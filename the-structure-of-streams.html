@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+        <title>The Daily Functor : The Structure of Streams</title>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="./theme/css/main.css" type="text/css" />
+        <link href="./feeds/all.atom.xml" type="application/atom+xml" rel="alternate" title="The Daily Functor ATOM Feed" />
+        
+        <link href="./feeds/all.rss.xml" type="application/atom+xml" rel="alternate" title="The Daily Functor RSS Feed" />
+        
+
+        <!--[if IE]>
+                <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+
+        <!--[if lte IE 7]>
+                <link rel="stylesheet" type="text/css" media="all" href="./css/ie.css"/>
+                <script src="./js/IE8.js" type="text/javascript"></script><![endif]-->
+
+        <!--[if lt IE 7]>
+                <link rel="stylesheet" type="text/css" media="all" href="./css/ie6.css"/><![endif]-->
+
+</head>
+
+<body>
+
+                
+<header>
+  <center>
+    <h1><a href="./index.html" id="site-title">The Daily Functor</a>
+    <h2>The Structure of Streams</h2>
+    Douglas Alan<br>
+    <time datetime="2012-03-28T20:06:14">Wed 28 March 2012</time>
+  </center>
+</header>
+<article>
+    <p>The purpose of this document is to explain something about how the Chip File
+Writer works. The Chip File Writer uses the &quot;Stream&quot; data type that comes with
+Scala as part of the standard library. Streams are a staple of functional
+programming. They were invented for the Scheme programming language, and then
+adopted and used heavily by Haskell. In fact, they are used so heavily in
+Haskell that <em>all</em> Lists in Haskell are really Streams.</p>
+<p>Streams offer a number of advantages for certain kinds of programming tasks,
+but due to differences between Scala and Scheme or Haskell, and for reasons
+that we will get into, in order to avoid exhausting the heap, more care has to
+be taken when using Streams in Scala than you would have to in either Scheme or
+Haskell.</p>
+<p>Streams are heavily used in Clojure too, and in Clojure, Streams work just like
+they do in Scala. Consequently, in Clojure the same level of care is also
+required. So fear not that if you become proficient in the use Streams in
+Scala, that this knowledge won't port to any other programming environment.</p>
+<p>Given the subtlety of Streams in Scala, why do we use them for the Chip File
+Writer? The executive summary is that the Chip File Writer does a single
+database query that results in writing out 11 different files, each of which
+represents a different transformation of the data that is contained in that
+single query. Since we cannot rely on the results of the query fitting into
+ram, the data from the stream is processed in a streaming manner in 11
+different ways. This sort of processing can be expressed very naturally using
+Streams.</p>
+<p>Sure, we could have done 11 different queries instead, and thereby simplified
+the structure and logic of the code, but then the program would be much
+slower. This will be an issue when we have many clone pools.</p>
+<p>Also, please note that in the discussion below I am describing the Chip File
+Writer when I show code examples and diagrams. I don't refer to the program by
+name below because I intend to break the following out into a stand-alone
+document intended for a more general audience.</p>
+<div class="section" id="what-are-streams">
+<h2>What Are Streams?</h2>
+<p>First of all, we should make it clear that the Streams we're talking about here
+are not I/O streams. That usage of the term &quot;stream&quot; is another perfectly valid
+use of the word, but it is also a completely different meaning of the
+word. Streams, as described here, are a data type that exists in Scala and
+other functional programming languages. This data type has no relation to I/O
+streams, other than that they both refer to potentially never-ending
+<em>sequential</em> sources of data.</p>
+<p>Streams are a staple of functional programming. They are &quot;lazy&quot; lists. I.e., in
+functional programming, a non-lazy List is a linked list data structure that
+looks something like this:</p>
+<img alt="Cons Cells" class="align-center" src="static/images/cons-cells.png" />
+<p>The above diagram represents <tt class="docutils literal"><span class="pre">List(&quot;foo&quot;,</span> &quot;bar&quot;, &quot;baz&quot;, &quot;qux&quot;)</tt>. It is made up
+of a collection of &quot;cons cells&quot; <a class="footnote-reference" href="#cons" id="id1">[1]</a>, where each cell contains one
+element of the list and a pointer to the rest of the list.</p>
+<p>Note that the entire List is contained in ram. This fact can be mighty
+inconvenient if you'd like to, say, have an infinite list. (I hear that an
+infinite amount of ram is pricey these days on the spot market.) For instance,
+let's say that we want a list that starts at 0, has 1 as its next element, and
+then just keeps going forever. You might think that we're just SOL, but we
+aren't. We just have to embrace the idea of a &quot;lazy list&quot;, a.k.a., a &quot;Stream&quot;.</p>
+<p>A Stream is just like a List, except that where the cons cell of a List
+contains a pointer to the rest of the List, the cons cell of a Stream contains
+an anonymous function instead. When you call &quot;.tail&quot; on a List, the pointer is
+followed to return the rest of the List. When you do the same thing on a
+Stream, instead of the pointer being followed, the anonymous function in the
+cons cell is called. This function then generates and returns the next cons
+cell in the Stream. Since this new cons cell also contains its own anonymous
+function, this process of generating new cons cells on demand can continue on
+indefinitely. If and when there are no more elements in the stream, the
+function in the last cons cell will return Stream.empty.</p>
+<p>In summary, the cons cell returned by &quot;.tail&quot; on a Stream contains two
+things:</p>
+<ol class="arabic simple">
+<li>The next element of the stream.</li>
+<li>A function to generate the cons cell that comes after the next
+one.</li>
+</ol>
+<p>In this fashion, the stream can generate <em>any</em> number of elements, and it
+will do so only as the elements are actually needed.</p>
+<p>In Scala, constructing the aforementioned infinite stream of the whole
+numbers is exceptionally easy:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">wholes</span> <span class="k">=</span> <span class="nc">Stream</span><span class="o">.</span><span class="n">from</span><span class="o">(</span><span class="mi">0</span><span class="o">)</span>
+</pre></div>
+<p>I know, I know... you're thinking that this is all fine and nifty, but don't we
+already have Iterators to serve this very purpose? Why, yes we do! And
+Iterators are also nifty keen and can be used a lot like Streams are used. The
+problem with Iterators is that they are not purely functional. I.e., a purely
+functional data structure is immutable -- it cannot be modified. This property
+allows us to reason more easily about certain properties of our programs. When
+we pull from an Iterator, on the other hand, the Iterator is modified and this
+can result in bugs. For instance, if you add some debugging code to print out
+the next element of an Iterator, that debugging code has consumed that value
+from the Iterator, and so that value will no longer make it to where it was
+supposed to go. When you use Streams instead, this particular bug cannot
+occur.</p>
+</div>
+<div class="section" id="composing-streams">
+<h2>Composing Streams</h2>
+<p>We created an infinite list of whole numbers above. Great! Now what? Hey, how
+about we generate a Stream of all the even numbers. That's easy enough:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">evens</span> <span class="k">=</span> <span class="n">wholes</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">}</span>
+</pre></div>
+<p>Now let's add up the first 10 even number:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">sum10</span> <span class="k">=</span> <span class="o">(</span><span class="n">evens</span> <span class="n">take</span> <span class="mi">10</span><span class="o">)</span> <span class="n">sum</span>
+</pre></div>
+<p>Now let's do an element-wise addition of all the odd and even numbers:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">sumOfOddAndEvens</span> <span class="k">=</span> <span class="o">(</span><span class="n">evens</span> <span class="n">zip</span> <span class="n">odds</span><span class="o">)</span> <span class="n">map</span> <span class="o">{</span> <span class="n">p</span> <span class="k">=&gt;</span> <span class="n">p</span><span class="o">.</span><span class="n">_1</span> <span class="o">+</span> <span class="n">p</span><span class="o">.</span><span class="n">_2</span><span class="o">}</span>
+</pre></div>
+<p>If we now do</p>
+<div class="highlight"><pre><span class="n">sumOfOddAndEvens</span> <span class="n">take</span> <span class="mi">10</span> <span class="n">print</span>
+</pre></div>
+<p>we'll see the following output:</p>
+<div class="highlight"><pre><span class="mi">1</span><span class="o">,</span> <span class="mi">5</span><span class="o">,</span> <span class="mi">9</span><span class="o">,</span> <span class="mi">13</span><span class="o">,</span> <span class="mi">17</span><span class="o">,</span> <span class="mi">21</span><span class="o">,</span> <span class="mi">25</span><span class="o">,</span> <span class="mi">29</span><span class="o">,</span> <span class="mi">33</span><span class="o">,</span> <span class="mi">37</span><span class="o">,</span> <span class="n">empty</span>
+</pre></div>
+<p>That was fun, but let's try something a little trickier. We'll now make make an
+infinite stream of Fibonacci numbers:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">fibs</span><span class="k">:</span> <span class="kt">Stream</span><span class="o">[</span><span class="kt">Int</span><span class="o">]</span> <span class="k">=</span> <span class="o">(</span>
+   <span class="mi">1</span> <span class="o">#::</span>
+   <span class="mi">1</span> <span class="o">#::</span>
+   <span class="o">((</span><span class="n">fibs</span> <span class="n">zip</span> <span class="n">fibs</span><span class="o">.</span><span class="n">tail</span><span class="o">)</span> <span class="n">map</span> <span class="o">{</span> <span class="n">p</span> <span class="k">=&gt;</span> <span class="n">p</span><span class="o">.</span><span class="n">_1</span> <span class="o">+</span> <span class="n">p</span><span class="o">.</span><span class="n">_2</span> <span class="o">}))</span>
+</pre></div>
+<p><tt class="docutils literal">#::</tt> in Scala is the Stream cons operator. (You can also invoke it as
+<tt class="docutils literal">Stream.cons()</tt>.) The above line of code conses up a Stream where the first
+element is 1, the next element is also 1, and then the rest of the stream is
+created by zipping the infinite stream of Fibonacci numbers with itself, only
+offset by one, and adding together the zipped pairs. Elegance incarnate!</p>
+<p>One thing to note about how this works is that the code after <tt class="docutils literal">#::</tt> above is
+not run immediately. If it were, this wouldn't work, since <tt class="docutils literal">fibs</tt> wouldn’t be
+defined yet at the time it was being used. Everything to the right of <tt class="docutils literal">#::</tt>
+is invoked via &quot;call by name&quot;, which means that is wrapped up in an invisible
+function literal, and that function is not called until it is needed.</p>
+<p>Now let's get really funky and generate prime numbers! The following bit of
+code will put an infinite stream of primes into the val <tt class="docutils literal">primes</tt>. Rad!</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="n">sieve</span><span class="o">(</span><span class="n">s</span><span class="k">:</span> <span class="kt">Stream</span><span class="o">[</span><span class="kt">Int</span><span class="o">])</span><span class="k">:</span> <span class="kt">Stream</span><span class="o">[</span><span class="kt">Int</span><span class="o">]</span> <span class="k">=</span>
+   <span class="n">s</span><span class="o">.</span><span class="n">head</span> <span class="o">#::</span> <span class="n">sieve</span><span class="o">(</span><span class="n">s</span><span class="o">.</span><span class="n">tail</span> <span class="n">filter</span> <span class="o">{</span> <span class="k">_</span> <span class="o">%</span> <span class="n">s</span><span class="o">.</span><span class="n">head</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">})</span>
+
+<span class="k">val</span> <span class="n">primes</span> <span class="k">=</span> <span class="n">sieve</span><span class="o">(</span><span class="nc">Stream</span><span class="o">.</span><span class="n">from</span><span class="o">(</span><span class="mi">2</span><span class="o">))</span>
+</pre></div>
+<p>The above code implements a Sieve of Eratosthenes, which is a way of itemizing
+all the primes. Let's say that we were to perform by hand on paper the Sieve of
+Eratosthenes algorithm. We might start by first writing down <em>all</em> the integers
+that are greater than or equal to 2 on an infinitely big piece of paper. Then
+we'd circle the smallest number that isn't already circled. Since we'd have
+just started, that number will be 2, which is our first prime. Then we'd cross
+off all the multiples of 2 that are on our infinite piece of paper. Once we'd
+finished that, we'd go back to the circling step and circle the smallest number
+that isn't already circled or crossed off. In this manner, the second number we
+circled would be 3, which is our next prime. We'd then cross off all the
+multiples of 3 from our infinite list. We'd lather, rinse, repeat until the end
+of time, and when we'd finished, what's left is only circled numbers, and these
+numbers are the primes.</p>
+<p>So, how does the above code implement this? We'll leave that as an exercise for
+the reader. Also, note that because Scala does not support fully general tail
+recursion, this solution will blow the stack if you walk down the stream far
+enough. (They say that Scala is the gateway drug to Haskell. In Haskell, you
+would <em>not</em> blow the stack with this implementation. You <em>will</em> eventually blow
+the heap in Haskell, as you need a little anonymous function for each non-prime
+number, but there's no way to implement this algorithm without requiring
+storage that continues to grow with the size of the prime that you are
+currently at, so this will always be a problem no matter what you do.)</p>
+</div>
+<div class="section" id="java-lang-outofmemoryerror-java-heap-space">
+<h2>java.lang.OutOfMemoryError: Java heap space</h2>
+<p>Unfortunately, all is not honeydew and milk of paradise in Streams Land. The
+reason for this is that in Scala, a Stream caches the element values. Or
+rather, a Stream cons cell caches the cons cell that is returned when you call
+<tt class="docutils literal">.tail</tt> on it. The next time you call <tt class="docutils literal">.tail</tt> on the cell, the Stream
+implementation won't have to recompute the next cell using the anonymous
+function that it contains. Instead, it will just return the cached cell.</p>
+<p>This feature can be very handy at times. For instance, if you have a very
+compute-intensive stream, and you need to walk down it several times, you may
+not want to pay the full CPU cost each time you walk down it.</p>
+<p>More significantly, if you use Streams for reading from a data source of some
+kind, the data may not exist anymore if it were not cached. E.g., imagine that
+you implement a stream that represents the output from a database query. In
+this example, each element of the Stream is a row in the result set. Now let's
+say that you walk down the Stream to fetch the tenth row, but you don't pay any
+heed to first nine rows when you do so. Later you decide that you want the
+fifth row. Too bad! It's gone. At least if the result set was provided by a
+unidirectional database cursor, it is. Consequently, we can't tolerate this
+sort of behavior from Streams--they are supposed to be purely functional, but
+if walking down a Stream invalidates previous elements of the Stream, then
+Streams are no different from Iterators. So, this is another reason that
+Scala caches the element values for Streams.</p>
+<p>Alas, this caching has a huge downside: You can easily exhaust the
+entire heap if you are not <em>extremely</em> careful. E.g., if you fetch the
+millionth row from a Stream that represents a database query, you
+will almost certainly exhaust the heap, as all the other 999,999 rows
+will end up being cached. What to do?!?</p>
+<p>At this point, you might be interested to know that the programming language
+Scheme, which is where Streams originated, does not cache Stream
+values. Perhaps it doesn't do so as an answer to this very conundrum. The
+downside for Scheme here is that Streams in Scheme are no good for reading I/O
+for the reasons mentioned above. You might also be interested to know that
+Scalaz provides a facility called Ephemeral Streams that are more like Scheme's
+Streams. No doubt it also does so as an answer to this conundrum.</p>
+<p>In any case, we now know what Scheme's approach to solving this problem
+is. What's Scala's? To answer this, it might be instructive to think about how
+Haskell handles this very same problem. Haskell's streams are just like Scala’s
+Streams, so why doesn't Haskell have this problem?</p>
+<p>The answer to this question is because in Haskell <strong>everything</strong> is lazy.</p>
+<p>Let's take a step back and look at an example of how being
+&quot;strict&quot; <a class="footnote-reference" href="#strict" id="id2">[2]</a> rather than &quot;lazy&quot; comes back to bite us when
+using Streams in Scala. Consider what happens if we do the following:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">evens</span> <span class="k">=</span> <span class="n">wholes</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">}</span>
+<span class="k">for</span> <span class="o">(</span><span class="n">n</span> <span class="k">&lt;-</span> <span class="n">evens</span><span class="o">)</span> <span class="n">println</span><span class="o">(</span><span class="n">n</span><span class="o">)</span>
+</pre></div>
+<p>At first blush, it would seem that this program will run forever. And if we had
+an infinite amount of memory it would. But every time through the loop, the
+stream bound to <tt class="docutils literal">evens</tt> will cache one more value, and eventually something's
+got to give. I.e., we'll rapidly exhaust the heap.</p>
+<p>How is this problem avoided in Haskell <a class="footnote-reference" href="#haskell" id="id3">[3]</a>? The answer is that in
+Haskell, <em>everything</em> is lazy. I.e., in Haskell the variable <tt class="docutils literal">evens</tt> wouldn't
+be bound to a Stream of even numbers when the first line is evaluated. What
+happens in Haskell is the same thing that would happen if we were to do the
+following in Scala:</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="n">evens</span> <span class="k">=</span> <span class="n">wholes</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">}</span>
+<span class="k">for</span> <span class="o">(</span><span class="n">n</span> <span class="k">&lt;-</span> <span class="n">evens</span><span class="o">)</span> <span class="n">println</span><span class="o">(</span><span class="n">n</span><span class="o">)</span>
+</pre></div>
+<p>I.e., we've replaced the <tt class="docutils literal">val</tt> keyword with <tt class="docutils literal">def</tt> in order to define
+<tt class="docutils literal">evens</tt>. And this revised Scala program will in fact run forever.</p>
+<p>One additional thing that you should keep in mind: Lazy vals in Scala are not
+lazy enough to solve the problem here. If you were to replace <tt class="docutils literal">def evens</tt> above
+with <tt class="docutils literal">lazy val evens</tt>, the heap would still end up being exhausted.</p>
+</div>
+<div class="section" id="the-tao-of-tee">
+<h2>The Tao of Tee</h2>
+<p>It might sound at the moment as if Streams are not worth the trouble in
+Scala. Sure, in Haskell you don't have to be careful with them since nothing is
+strict. But in Scala, you have to code everything that uses Streams in a
+somewhat different manner than you would typically do, and if you screw it up
+anywhere, bye bye heap! Why not leave Streams to Haskell? Or just limit
+ourselves to the Scheme kind of stream that doesn't have this issue?</p>
+<p>But wait! Don't give up now! There is at least <em>one</em> use-case for Streams that
+seems to be worth the trouble: Let's say you have a stream of data that needs
+to be processed in several different ways, and you want to handle this
+modularly. Sure, you could perhaps just write the entire stream to a temp file
+and then process the temp file several ways before deleting it. Or you might
+set up a list of callbacks to be invoked on each record in the stream. Or you
+might represent the data stream as an iterator and then tee the iterator rather
+than teeing a Stream. <a class="footnote-reference" href="#teeing" id="id4">[4]</a></p>
+<p>Those approaches can work fine, but arguably they are less elegant than using
+Streams for this use-case. Streams <em>live</em> for this kind of task.</p>
+<p>Streams are also very natural for when you have a pipeline of processing that
+wants to be performed on a data stream. The Unix pipes model of modular
+computation is a great success, and when you use Streams you can program
+naturally in this style without having to have each pipeline element be a
+separate program.</p>
+<p>Now imagine a program that has a complex combination of <em>both</em> teeing and
+piping: Streams can make this kind of thing, which might otherwise be daunting,
+seem more approachable and natural. For example, the following diagram
+represent the dataflow in a real bioinformatics program that I wrote:</p>
+<img alt="Cons Cells" class="align-center" src="static/images/chipfile-writer-dataflow-smaller.png" />
+<p>Don't worry about the particular details of this diagram. The important thing
+to note is that there is a stream of data coming from a database cursor. It
+gets processed a bit. The processed data then gets split into two different
+directions so that it can be filtered in two different ways. The filtered data
+is then resplit and further processed in 11 different ways. Finally, the
+processed data is written out to 11 different output files.</p>
+<p>The following code does all the wiring that is represented in the above
+diagram:</p>
+<div class="highlight"><pre><span class="k">private</span> <span class="k">def</span> <span class="n">processDataAndWriteFiles</span><span class="o">(</span><span class="n">iRows</span><span class="k">:</span> <span class="kt">IRows</span><span class="o">)</span> <span class="o">{</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">compatFilename</span><span class="o">)</span>         <span class="o">{</span> <span class="n">compatFile</span>         <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">compatAnnotFilename</span><span class="o">)</span>    <span class="o">{</span> <span class="n">compatAnnotFile</span>    <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">geneFilename</span><span class="o">)</span>           <span class="o">{</span> <span class="n">geneFile</span>           <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">geneAnnotFilename</span><span class="o">)</span>      <span class="o">{</span> <span class="n">geneAnnotFile</span>      <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">geneSdrFilename</span><span class="o">)</span>        <span class="o">{</span> <span class="n">geneSdrFile</span>        <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">geneSdrAnnotFilename</span><span class="o">)</span>   <span class="o">{</span> <span class="n">geneSdrAnnotFile</span>   <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">transFilename</span><span class="o">)</span>          <span class="o">{</span> <span class="n">transFile</span>          <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">transAnnotFilename</span><span class="o">)</span>     <span class="o">{</span> <span class="n">transAnnotFile</span>     <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">transSdrFilename</span><span class="o">)</span>       <span class="o">{</span> <span class="n">transSdrFile</span>       <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">transSdrAnnotFilename</span><span class="o">)</span>  <span class="o">{</span> <span class="n">transSdrAnnotFile</span>  <span class="k">=&gt;</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="n">referenceFilename</span><span class="o">)</span>      <span class="o">{</span> <span class="n">referenceFile</span>      <span class="k">=&gt;</span>
+
+    <span class="n">writeSyncedStreamsToFiles</span> <span class="o">{</span>
+
+      <span class="k">val</span> <span class="n">blocks</span>               <span class="k">=</span> <span class="n">toBlocks</span><span class="o">(</span><span class="n">iRows</span><span class="o">)</span>
+      <span class="k">val</span> <span class="n">totalMatchBlocks</span>     <span class="k">=</span> <span class="n">filterByMatchPercent</span><span class="o">(</span><span class="n">blocks</span><span class="o">,</span> <span class="n">requireTotalMatch</span><span class="k">=</span><span class="kc">true</span><span class="o">)</span>
+      <span class="k">val</span> <span class="n">sdrMatchBlocks</span>       <span class="k">=</span> <span class="n">filterByMatchPercent</span><span class="o">(</span><span class="n">blocks</span><span class="o">,</span> <span class="n">requireTotalMatch</span><span class="k">=</span><span class="kc">false</span><span class="o">)</span>
+
+      <span class="k">val</span> <span class="n">compatOBlocks</span>        <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">compatOBlock</span> <span class="o">}</span>
+      <span class="k">val</span> <span class="n">geneOBlocks</span>          <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+      <span class="k">val</span> <span class="n">transOBlocks</span>         <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+      <span class="k">val</span> <span class="n">geneSdrOBlocks</span>       <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+      <span class="k">val</span> <span class="n">transSdrOBlocks</span>      <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+
+      <span class="k">val</span> <span class="n">compatAnnotOBlocks</span>   <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">compatAnnotOBlock</span>   <span class="o">}</span>
+      <span class="k">val</span> <span class="n">geneAnnotOBlocks</span>     <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneAnnotOBlock</span>     <span class="o">}</span>
+      <span class="k">val</span> <span class="n">transAnnotOBlocks</span>    <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transAnnotOBlock</span>    <span class="o">}</span>
+      <span class="k">val</span> <span class="n">geneSdrAnnotOBlocks</span>  <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneSdrAnnotOBlock</span>  <span class="o">}</span>
+      <span class="k">val</span> <span class="n">transSdrAnnotOBlocks</span> <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transSdrAnnotOBlock</span> <span class="o">}</span>
+
+      <span class="k">val</span> <span class="n">referenceOBlocks</span>     <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">referenceOBlock</span> <span class="o">}</span>
+
+      <span class="k">val</span> <span class="n">pipelines</span><span class="k">:</span> <span class="kt">StreamPipelines</span> <span class="o">=</span> <span class="nc">Seq</span><span class="o">(</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">CompatColNames</span><span class="o">)</span>        <span class="o">++</span> <span class="n">compatOBlocks</span>         <span class="o">-&gt;</span> <span class="n">compatFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">GeneColNames</span><span class="o">)</span>          <span class="o">++</span> <span class="n">geneOBlocks</span>           <span class="o">-&gt;</span> <span class="n">geneFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">TransColNames</span><span class="o">)</span>         <span class="o">++</span> <span class="n">transOBlocks</span>          <span class="o">-&gt;</span> <span class="n">transFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">GeneColNames</span><span class="o">)</span>          <span class="o">++</span> <span class="n">geneSdrOBlocks</span>        <span class="o">-&gt;</span> <span class="n">geneSdrFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">TransColNames</span><span class="o">)</span>         <span class="o">++</span> <span class="n">transSdrOBlocks</span>       <span class="o">-&gt;</span> <span class="n">transSdrFile</span><span class="o">,</span>
+
+        <span class="n">header</span><span class="o">(</span><span class="nc">CompatAnnotColNames</span><span class="o">)</span>   <span class="o">++</span> <span class="n">compatAnnotOBlocks</span>    <span class="o">-&gt;</span> <span class="n">compatAnnotFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">GeneAnnotColNames</span><span class="o">)</span>     <span class="o">++</span> <span class="n">geneAnnotOBlocks</span>      <span class="o">-&gt;</span> <span class="n">geneAnnotFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">TransAnnotColNames</span><span class="o">)</span>    <span class="o">++</span> <span class="n">transAnnotOBlocks</span>     <span class="o">-&gt;</span> <span class="n">transAnnotFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">GeneSdrAnnotColNames</span><span class="o">)</span>  <span class="o">++</span> <span class="n">geneSdrAnnotOBlocks</span>   <span class="o">-&gt;</span> <span class="n">geneSdrAnnotFile</span><span class="o">,</span>
+        <span class="n">header</span><span class="o">(</span><span class="nc">TransSdrAnnotColNames</span><span class="o">)</span> <span class="o">++</span> <span class="n">transSdrAnnotOBlocks</span>  <span class="o">-&gt;</span> <span class="n">transSdrAnnotFile</span><span class="o">,</span>
+
+        <span class="nc">Stream</span><span class="o">(</span><span class="nc">Nil</span><span class="o">)</span>                   <span class="o">++</span> <span class="n">referenceOBlocks</span>      <span class="o">-&gt;</span> <span class="n">referenceFile</span><span class="o">)</span>
+
+      <span class="n">pipelines</span>
+    <span class="o">}</span> <span class="c1">// end writeSyncedStreamsToFiles</span>
+
+  <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="o">}</span> <span class="c1">// end printToFile</span>
+
+<span class="o">}</span> <span class="c1">// end processDataAndWriteFiles()</span>
+</pre></div>
+<p>Let's break this code down line by line, so that it might seem less
+daunting. The following chunk of code opens up 11 different output files and
+puts the output PrintWriters into the vals <tt class="docutils literal">compatFile</tt>, <tt class="docutils literal">compatAnnotFile</tt>,
+etc.:</p>
+<div class="highlight"><pre><span class="n">printToFile</span><span class="o">(</span><span class="n">compatFilename</span><span class="o">)</span>         <span class="o">{</span> <span class="n">compatFile</span>         <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">compatAnnotFilename</span><span class="o">)</span>    <span class="o">{</span> <span class="n">compatAnnotFile</span>    <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">geneFilename</span><span class="o">)</span>           <span class="o">{</span> <span class="n">geneFile</span>           <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">geneAnnotFilename</span><span class="o">)</span>      <span class="o">{</span> <span class="n">geneAnnotFile</span>      <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">geneSdrFilename</span><span class="o">)</span>        <span class="o">{</span> <span class="n">geneSdrFile</span>        <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">geneSdrAnnotFilename</span><span class="o">)</span>   <span class="o">{</span> <span class="n">geneSdrAnnotFile</span>   <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">transFilename</span><span class="o">)</span>          <span class="o">{</span> <span class="n">transFile</span>          <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">transAnnotFilename</span><span class="o">)</span>     <span class="o">{</span> <span class="n">transAnnotFile</span>     <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">transSdrFilename</span><span class="o">)</span>       <span class="o">{</span> <span class="n">transSdrFile</span>       <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">transSdrAnnotFilename</span><span class="o">)</span>  <span class="o">{</span> <span class="n">transSdrAnnotFile</span>  <span class="k">=&gt;</span>
+<span class="n">printToFile</span><span class="o">(</span><span class="n">referenceFilename</span><span class="o">)</span>      <span class="o">{</span> <span class="n">referenceFile</span>      <span class="k">=&gt;</span>
+</pre></div>
+<p><tt class="docutils literal">printToFile()</tt> is a function defined elsewhere <a class="footnote-reference" href="#printtofile" id="id5">[5]</a> that uses the &quot;loan pattern&quot; in
+order to act as an &quot;unwind protect&quot;, making sure that an open file gets
+closed. <tt class="docutils literal">printToFile()</tt> opens the file specified by the filename. The resulting
+PrintWriter (i.e., the output I/O object) is bound to the specified val, and
+the PrintWriter is automatically closed when the scope is left. I.e., here all
+the output files will be automatically closed at the end of
+<tt class="docutils literal">processDataAndWriteFiles()</tt>.</p>
+<p>The next line of <tt class="docutils literal">processDataAndWriteFiles()</tt> calls a function (implemented
+elsewhere) that arranges to write out all of the streams to their respective
+files:</p>
+<div class="highlight"><pre><span class="n">writeSyncedStreamsToFiles</span> <span class="o">{</span>
+</pre></div>
+<p>We'll come back to this later, as its implementation is a bit tricky.</p>
+<p>The following few lines implement the first tee shown in the diagram that we
+looked at a short while ago:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">blocks</span>               <span class="k">=</span> <span class="n">toBlocks</span><span class="o">(</span><span class="n">iRows</span><span class="o">)</span>
+<span class="k">val</span> <span class="n">totalMatchBlocks</span>     <span class="k">=</span> <span class="n">filterByMatchPercent</span><span class="o">(</span><span class="n">blocks</span><span class="o">,</span> <span class="n">requireTotalMatch</span><span class="k">=</span><span class="kc">true</span><span class="o">)</span>
+<span class="k">val</span> <span class="n">sdrMatchBlocks</span>       <span class="k">=</span> <span class="n">filterByMatchPercent</span><span class="o">(</span><span class="n">blocks</span><span class="o">,</span> <span class="n">requireTotalMatch</span><span class="k">=</span><span class="kc">false</span><span class="o">)</span>
+</pre></div>
+<p>The first line above chunks the query rows into blocks of rows and the next two
+lines each filter that Stream of blocks, but in two different ways.</p>
+<p><em>Precisely</em> what <tt class="docutils literal">toBlocks()</tt> and <tt class="docutils literal">filterByMatchPercent()</tt> do isn't relevant to
+this discussion. All that you need to understand is (1) that <tt class="docutils literal">toBlocks()</tt>
+transforms a Stream of rows into a Stream with the same data, only the rows
+have been grouped into blocks of rows and (2) that <tt class="docutils literal">filterByMatchPercent()</tt>
+transforms a Stream containing a block of rows into a Stream containing the same
+blocks, but where rows may have been filtered out of each block.</p>
+<p>Also, don't forget that the filtering isn't actually happening now, but rather
+we are just constructing new Streams, for which the actual computations are
+delayed until the results are actually needed.</p>
+<p>When looking at the above code, you may say to yourself, &quot;But Doug, you told me
+that I couldn't use vals, not even lazy vals, to hold streams!&quot; Yes, I might
+have hinted as much, didn't I? That's not completely right, however. The reason
+why it's okay to use vals in the code above to hold streams is because these
+vals will have all left scope by the time the streams are actually
+traversed. Since these vals won't be on the stack (or preserved in closures)
+when the streams are used, they won't be holding onto the front of the
+streams. It is the &quot;front holding&quot; that causes the problems.</p>
+<p>To see that vals will no longer be in scope, notice that the vals are only
+used to construct a Seq (which in this case, is just a standard List), and then
+the Seq is returned out of the scope of the &quot;vals&quot; so that the front of the Streams
+are not being held onto anymore by the vals--the Stream fronts are only being
+held onto by the returned Seq.</p>
+<p>Before moving onto the implementation of <tt class="docutils literal">writeSyncedStreamsToFiles()</tt>, let's
+finish looking at the wiring that takes place in
+<tt class="docutils literal">processDataAndWriteFiles()</tt>:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">compatOBlocks</span>        <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">compatOBlock</span> <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneOBlocks</span>          <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+<span class="k">val</span> <span class="n">transOBlocks</span>         <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneSdrOBlocks</span>       <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+<span class="k">val</span> <span class="n">transSdrOBlocks</span>      <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+
+<span class="k">val</span> <span class="n">compatOBlocks</span>        <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">compatOBlock</span> <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneOBlocks</span>          <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+<span class="k">val</span> <span class="n">transOBlocks</span>         <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneSdrOBlocks</span>       <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneOBlock</span>   <span class="o">}</span>
+<span class="k">val</span> <span class="n">transSdrOBlocks</span>      <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transOBlock</span>  <span class="o">}</span>
+
+<span class="k">val</span> <span class="n">compatAnnotOBlocks</span>   <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">compatAnnotOBlock</span>   <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneAnnotOBlocks</span>     <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneAnnotOBlock</span>     <span class="o">}</span>
+<span class="k">val</span> <span class="n">transAnnotOBlocks</span>    <span class="k">=</span> <span class="n">totalMatchBlocks</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transAnnotOBlock</span>    <span class="o">}</span>
+<span class="k">val</span> <span class="n">geneSdrAnnotOBlocks</span>  <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">geneSdrAnnotOBlock</span>  <span class="o">}</span>
+<span class="k">val</span> <span class="n">transSdrAnnotOBlocks</span> <span class="k">=</span> <span class="n">sdrMatchBlocks</span>   <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">transSdrAnnotOBlock</span> <span class="o">}</span>
+</pre></div>
+<p>If you examine the above code, you'll see that we re-tee the original two tees
+into 11 new directions, where each of the resulting tee branches is processed
+with a different transformation.</p>
+<p>We then construct the Seq that we just talked about a few paragraphs back:</p>
+<div class="highlight"><pre><span class="k">val</span> <span class="n">pipelines</span><span class="k">:</span> <span class="kt">StreamPipelines</span> <span class="o">=</span> <span class="nc">Seq</span><span class="o">(</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">CompatColNames</span><span class="o">)</span>        <span class="o">++</span> <span class="n">compatOBlocks</span>         <span class="o">-&gt;</span> <span class="n">compatFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">GeneColNames</span><span class="o">)</span>          <span class="o">++</span> <span class="n">geneOBlocks</span>           <span class="o">-&gt;</span> <span class="n">geneFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">TransColNames</span><span class="o">)</span>         <span class="o">++</span> <span class="n">transOBlocks</span>          <span class="o">-&gt;</span> <span class="n">transFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">GeneColNames</span><span class="o">)</span>          <span class="o">++</span> <span class="n">geneSdrOBlocks</span>        <span class="o">-&gt;</span> <span class="n">geneSdrFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">TransColNames</span><span class="o">)</span>         <span class="o">++</span> <span class="n">transSdrOBlocks</span>       <span class="o">-&gt;</span> <span class="n">transSdrFile</span><span class="o">,</span>
+
+  <span class="n">header</span><span class="o">(</span><span class="nc">CompatAnnotColNames</span><span class="o">)</span>   <span class="o">++</span> <span class="n">compatAnnotOBlocks</span>    <span class="o">-&gt;</span> <span class="n">compatAnnotFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">GeneAnnotColNames</span><span class="o">)</span>     <span class="o">++</span> <span class="n">geneAnnotOBlocks</span>      <span class="o">-&gt;</span> <span class="n">geneAnnotFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">TransAnnotColNames</span><span class="o">)</span>    <span class="o">++</span> <span class="n">transAnnotOBlocks</span>     <span class="o">-&gt;</span> <span class="n">transAnnotFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">GeneSdrAnnotColNames</span><span class="o">)</span>  <span class="o">++</span> <span class="n">geneSdrAnnotOBlocks</span>   <span class="o">-&gt;</span> <span class="n">geneSdrAnnotFile</span><span class="o">,</span>
+  <span class="n">header</span><span class="o">(</span><span class="nc">TransSdrAnnotColNames</span><span class="o">)</span> <span class="o">++</span> <span class="n">transSdrAnnotOBlocks</span>  <span class="o">-&gt;</span> <span class="n">transSdrAnnotFile</span><span class="o">,</span>
+
+  <span class="nc">Stream</span><span class="o">(</span><span class="nc">Nil</span><span class="o">)</span>                   <span class="o">++</span> <span class="n">referenceOBlocks</span>      <span class="o">-&gt;</span> <span class="n">referenceFile</span><span class="o">)</span>
+</pre></div>
+<p>The Seq that we construct is a List of tuples, where each tuple contains a
+Stream and an output file. The function <tt class="docutils literal">writeSyncedStreamsToFiles()</tt> will
+write each of the Streams to the corresponding file.</p>
+<p>Notice that we also prepend a header onto each output stream. In this case, the
+output files are TSV files and the headers will be tab-separated column names,
+but that detail isn't particularly relevant to this discussion.</p>
+<p>Also note that on the last line shown above we prepend a null header. The
+reason for this is that that particular output file doesn't have a header, but
+we need to append something onto the beginning of the Stream anyway, since all
+of the Streams to be output must have exactly the same number of elements. This
+requirement is to make sure that all of the Streams stay in sync with each
+other when we go to write them to their output files. If they were to drift out
+of sync, then the Stream implementation would end up having to cache all the
+elements of parent streams that represent the difference between the fasted
+child stream and the slowest child stream. But if we make sure that all of the
+streams are consumed at the same rate, then we don't end up having to cache
+much at all.</p>
+</div>
+<div class="section" id="the-sanctity-of-synchrononization">
+<h2>The Sanctity of Synchrononization</h2>
+<p>So, now let's look at the code that does the actual writing of the data in the
+Streams to their output files. The following is the definition of
+<tt class="docutils literal">writeSyncedStreamsToFiles()</tt>, which we discussed a bit earlier:</p>
+<div class="highlight"><pre><span class="k">private</span> <span class="k">type</span> <span class="kt">StreamPipeline</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Stream</span><span class="o">[</span><span class="kt">OBlock</span><span class="o">],</span> <span class="nc">PrintWriter</span><span class="o">)</span>
+
+<span class="k">private</span> <span class="k">def</span> <span class="n">writeSyncedStreamsToFiles</span><span class="o">(</span><span class="n">pipeline</span><span class="k">:</span> <span class="o">=&gt;</span> <span class="nc">Seq</span><span class="o">[</span><span class="kt">StreamPipeline</span><span class="o">])</span> <span class="o">{</span>
+  <span class="n">processSyncedStreams</span> <span class="o">{</span>
+    <span class="n">pipeline</span> <span class="n">map</span> <span class="o">{</span> <span class="n">pair</span> <span class="k">=&gt;</span>
+      <span class="k">val</span> <span class="n">stream</span> <span class="k">=</span> <span class="n">pair</span><span class="o">.</span><span class="n">_1</span>
+      <span class="k">val</span> <span class="n">out</span> <span class="k">=</span> <span class="n">pair</span><span class="o">.</span><span class="n">_2</span>
+      <span class="k">val</span> <span class="n">retval</span> <span class="k">=</span> <span class="o">(</span><span class="n">stream</span><span class="o">,</span>
+                    <span class="o">{</span> <span class="n">printTsvLineFromSeq</span><span class="o">(</span><span class="n">out</span><span class="o">,</span> <span class="k">_:</span> <span class="kt">ORow</span><span class="o">)</span> <span class="o">})</span>
+      <span class="n">retval</span>
+    <span class="o">}</span>
+  <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+<p>This function takes as its argument a Seq of tuples, where each tuple contains
+a Stream and the PrintWriter to which the Stream is to be written. It delegates
+most of the work to <tt class="docutils literal">processSyncedStreams()</tt> however. The reason for this
+delegation is that <tt class="docutils literal">processSyncedStreams()</tt> is just a bit more general. The
+tuples that <tt class="docutils literal">writeSyncedStreamsToFiles()</tt> work on each contain a Stream and an
+output PrintWriter, while the tuples that <tt class="docutils literal">processSyncedStreams()</tt> work on each
+contain a Stream and a function to process each element of the Stream. The
+above function, <tt class="docutils literal">writeSyncedStreamsToFiles()</tt> exists just to transform the
+output PrintWriters into functions that write to the PrintWriters.</p>
+<p>Note that in the above function we extract the tuple elements into vals named
+<tt class="docutils literal">stream</tt> and <tt class="docutils literal">out</tt>. This is required to prevent heap exhaustion. The reason for
+this is that if <tt class="docutils literal">pair._1</tt> and or <tt class="docutils literal">pair._2</tt> had been used directly in the
+function literal that is used in the construction of <tt class="docutils literal">retval</tt>, then the
+resulting closure would end up holding onto <tt class="docutils literal">pair</tt>, which would then end up
+holding onto <tt class="docutils literal">pair._1</tt>, which is the front of a Stream. Holding onto the front
+of a Stream here would ultimately cause the heap to be exhausted.</p>
+<p>So, you can probably now see that this &quot;last ten yards&quot; of dealing with Streams
+is fraught with peril. Ideally, we will ultimately generalize these functions
+and move them into a reusable library, where we won't ever have to mess with
+them again. When this happens, the issues we are fretting over now will be
+mostly moot.</p>
+<p>Now let's look at the implementation of <tt class="docutils literal">processSyncedStreams()</tt>:</p>
+<div class="highlight"><pre><span class="k">private</span> <span class="k">type</span> <span class="kt">StreamProcess</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Stream</span><span class="o">[</span><span class="kt">OBlock</span><span class="o">],</span> <span class="nc">ORow</span> <span class="k">=&gt;</span> <span class="nc">Unit</span><span class="o">)</span>
+
+<span class="k">private</span> <span class="k">def</span> <span class="n">processSyncedStreams</span><span class="o">(</span><span class="n">processes</span><span class="k">:</span> <span class="o">=&gt;</span> <span class="nc">Seq</span><span class="o">[</span><span class="kt">StreamProcess</span><span class="o">])</span> <span class="o">{</span>
+  <span class="n">loop</span><span class="o">(</span><span class="n">processes</span><span class="o">)</span>
+
+  <span class="nd">@tailrec</span>
+  <span class="k">def</span> <span class="n">loop</span><span class="o">(</span><span class="n">processes</span><span class="k">:</span> <span class="kt">Seq</span><span class="o">[</span><span class="kt">StreamProcess</span><span class="o">])</span> <span class="o">{</span>
+
+    <span class="c1">// We define these just to make the following code more self-explanatory:</span>
+    <span class="k">def</span> <span class="n">getStream</span><span class="o">(</span><span class="n">p</span><span class="k">:</span> <span class="kt">StreamProcess</span><span class="o">)</span> <span class="k">=</span> <span class="n">p</span><span class="o">.</span><span class="n">_1</span>
+    <span class="k">def</span> <span class="n">getProc</span>  <span class="o">(</span><span class="n">p</span><span class="k">:</span> <span class="kt">StreamProcess</span><span class="o">)</span> <span class="k">=</span> <span class="n">p</span><span class="o">.</span><span class="n">_2</span>
+
+    <span class="c1">// This is a view because most of the time we only need the first element:</span>
+    <span class="k">val</span> <span class="n">streams</span> <span class="k">=</span> <span class="o">(</span><span class="n">processes</span> <span class="n">map</span> <span class="o">{</span> <span class="k">_</span><span class="o">.</span><span class="n">_1</span> <span class="o">}).</span><span class="n">view</span>
+
+    <span class="c1">// If we&#39;ve hit the end of the first stream, make sure that we&#39;ve also hit the end</span>
+    <span class="c1">// everywhere else:</span>
+    <span class="k">if</span> <span class="o">(</span><span class="n">streams</span><span class="o">(</span><span class="mi">0</span><span class="o">).</span><span class="n">isEmpty</span><span class="o">)</span> <span class="o">{</span>
+      <span class="k">for</span> <span class="o">(</span><span class="n">stream</span> <span class="k">&lt;-</span> <span class="n">streams</span><span class="o">)</span>
+        <span class="n">assertData</span><span class="o">(</span><span class="n">stream</span><span class="o">.</span><span class="n">isEmpty</span><span class="o">,</span> <span class="s">&quot;All the streams in the tee should end at the same.&quot;</span><span class="o">)</span>
+    <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+
+      <span class="c1">// If we haven&#39;t hit the end of the first stream, then run each proc on its respective</span>
+      <span class="c1">// stream head:</span>
+      <span class="k">for</span> <span class="o">((</span><span class="n">stream</span><span class="o">,</span> <span class="n">proc</span><span class="o">)</span> <span class="k">&lt;-</span> <span class="n">processes</span><span class="o">)</span> <span class="o">{</span>
+        <span class="n">assertData</span><span class="o">(!</span><span class="n">stream</span><span class="o">.</span><span class="n">isEmpty</span><span class="o">,</span> <span class="s">&quot;The streams in the tee should all end at the same.&quot;</span><span class="o">)</span>
+        <span class="k">val</span> <span class="n">rows</span> <span class="k">=</span> <span class="n">stream</span><span class="o">.</span><span class="n">head</span>
+        <span class="n">rows</span> <span class="n">foreach</span> <span class="n">proc</span>
+      <span class="o">}</span>
+
+      <span class="c1">// And then loop over the stream tails:</span>
+      <span class="n">loop</span><span class="o">(</span><span class="n">processes</span> <span class="n">map</span> <span class="o">{</span> <span class="n">x</span> <span class="k">=&gt;</span> <span class="o">(</span><span class="n">getStream</span><span class="o">(</span><span class="n">x</span><span class="o">).</span><span class="n">tail</span><span class="o">,</span>
+                                 <span class="n">getProc</span><span class="o">(</span><span class="n">x</span><span class="o">))</span> <span class="o">})</span>
+    <span class="o">}</span>
+  <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+<p>This function was implemented using tail recursion, but it could just have
+easily been implemented with a while loop. We implemented here using tail
+recursion just to keep in the purely functional spirit with which we started
+this venture.</p>
+<p>If you can remember a few pages back, we mentioned that we needed to keep all
+the Streams synchronized with each other in order to prevent any of the Streams
+from pulling on the database cursor faster than any other. I.e., all of the
+streams need to pull on the database cursor at the same rate. If this rule is
+broken, then many rows from the database cursor could end up being cached by the
+Stream implementation, and this would likely blow the heap.</p>
+<p>Consequently, what the above function does is to walk down all of the Streams
+in lockstep. On each iteration of the loop, it calls each Stream's processing
+function on the head of the Stream. Then it reconstructs the Seq so that the
+new Seq contains all of the <em>tails</em> of the Streams. This frees up what was
+previously the first cons cell of each Stream so that these cons cells can be
+garbage-collected. The loop continues on like this until the ends of all of the
+Streams are reached. When this happens, <tt class="docutils literal">processSyncedStreams()</tt> is done and it
+returns. If the Streams have no ends (i.e., they are infinite), then this
+function will loop forever, and yet it won't exhaust the heap.</p>
+</div>
+<div class="section" id="conclusion">
+<h2>Conclusion</h2>
+<p>Now you will hopefully see, if your head doesn't hurt too much from all of this
+fussy exposition, that in Scala using Streams can be an elegant and expressive
+technique for solving problems that have an inherent dataflow structure to
+them. I.e., when the data processing is naturally expressed as data pipelines
+and/or tees.</p>
+</div>
+<div class="section" id="footnotes">
+<h2>Footnotes</h2>
+<table class="docutils footnote" frame="void" id="cons" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id1">[1]</a></td><td>The term &quot;cons&quot; is a bit of historical terminology from the Lisp
+programming language dating back to 1956. It stands for &quot;construct&quot;.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="strict" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id2">[2]</a></td><td>&quot;Strict&quot; is the opposite of &quot;lazy&quot;. Almost all programming
+languages are strict. Haskell is a rare exception. Haskell delays the
+evaluation of everything as long as it possibly can, while other programming
+languages typically evaluate everything right away. Scala allows you to specify
+that certain things should be evaluated lazily, however. E.g., you can declare
+a val to be lazy or you can use <tt class="docutils literal">def</tt> to also define a name that is evaluated
+lazily. For function parameters, you can declare them to be call-by-name, which
+is very similar to defining a name using <tt class="docutils literal">def</tt>.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="haskell" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id3">[3]</a></td><td>An interesting factoid about Haskell is that Haskell does not call
+Streams, &quot;Streams&quot;. Haskell is so lazy that Lists in Haskell turn out to <em>be</em>
+Streams and consequently no seperate data type is needed. Also, the syntax of
+Haskell is, of course, different from the syntax of Scala, but let's pretend
+for the moment that their syntax is the same just to make the discussion
+easier.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="teeing" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id4">[4]</a></td><td>When teeing an iterator, however, you still have to program very
+carefully to avoid exhausting the heap. The reason for this is that if the
+iterators get out of sync with each other, the program will either do the wrong
+thing, or it will have a buffer that buffers up the data inbetween the location
+of the slowest iterator and the fastest iterator, and if this gap grows large,
+it will consume a lot of ram.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="printtofile" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id5">[5]</a></td><td>This is how <tt class="docutils literal">printToFile()</tt> is implemented:</td></tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span class="k">def</span> <span class="n">printToFile</span><span class="o">(</span><span class="n">file</span><span class="k">:</span> <span class="kt">File</span><span class="o">)(</span><span class="n">body</span><span class="k">:</span> <span class="kt">PrintWriter</span> <span class="o">=&gt;</span> <span class="nc">Unit</span><span class="o">)</span> <span class="o">{</span>
+  <span class="k">val</span> <span class="n">p</span> <span class="k">=</span> <span class="k">new</span> <span class="nc">PrintWriter</span><span class="o">(</span><span class="n">file</span><span class="o">)</span>
+  <span class="k">try</span> <span class="n">body</span><span class="o">(</span><span class="n">p</span><span class="o">)</span>
+  <span class="k">finally</span> <span class="n">p</span><span class="o">.</span><span class="n">close</span><span class="o">()</span>
+<span class="o">}</span>
+
+<span class="k">def</span> <span class="n">printToFile</span><span class="o">(</span><span class="n">filepath</span><span class="k">:</span> <span class="kt">String</span><span class="o">)(</span><span class="n">body</span><span class="k">:</span> <span class="kt">PrintWriter</span> <span class="o">=&gt;</span> <span class="nc">Unit</span><span class="o">)</span> <span class="o">{</span>
+  <span class="n">printToFile</span><span class="o">(</span><span class="k">new</span> <span class="nc">File</span><span class="o">(</span><span class="n">filepath</span><span class="o">))(</span><span class="n">body</span><span class="o">);</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+
+</article>
+
+<!-- Disqus Stuff -->
+
+<h2>Comments</h2>
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+    /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+    var disqus_shortname = 'dailyfunctor'; // required: replace example with your forum shortname
+
+    /* * * DON'T EDIT BELOW THIS LINE * * */
+    (function() {
+        var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+        dsq.src = 'http://' + disqus_shortname + '.disqus.com/embed.js';
+        (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+    })();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">blog comments powered by <span class="logo-disqus">Disqus</span></a>
+
+
+
+        <footer>
+            <nav>
+                <ul>
+                
+                
+                
+                </ul>
+            </nav>
+        </footer>
+
+
+
+</body>
+</html>
