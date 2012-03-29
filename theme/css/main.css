@@ -74,8 +74,11 @@ h2 {
 
 /* line 39, ../../compass/src/main.scss */
 h3 {
-  font-family: Georgia, "Times New Roman", Times, serif;
-  font-size: 1em;
+/*  font-family: Georgia, "Times New Roman", Times, serif; */
+
+  font-family: Helvetica, sans-serif;
+  font-weight: normal;
+  font-size: 1.0em;
   color: #000000;
 }
 
