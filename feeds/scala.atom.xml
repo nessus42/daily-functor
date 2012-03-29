@@ -1,34 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>The Daily Functor</title><link href="http://nessus42.github.com/daily-functor" rel="alternate"></link><link href="http://nessus42.github.com/daily-functor/feeds/misc.atom.xml" rel="self"></link><id>http://nessus42.github.com/daily-functor</id><updated>2012-03-28T20:06:14-04:00</updated><entry><title>The Structure of Streams</title><link href="http://nessus42.github.com/daily-functor/the-structure-of-streams.html" rel="alternate"></link><updated>2012-03-28T20:06:14-04:00</updated><author><name>Douglas Alan</name></author><id>http://nessus42.github.com/daily-functor/the-structure-of-streams.html</id><summary type="html">&lt;p&gt;The purpose of this document is to explain something about how the Chip File
-Writer works. The Chip File Writer uses the &amp;quot;Stream&amp;quot; data type that comes with
-Scala as part of the standard library. Streams are a staple of functional
-programming. They were invented for the Scheme programming language, and then
-adopted and used heavily by Haskell. In fact, they are used so heavily in
-Haskell that &lt;em&gt;all&lt;/em&gt; Lists in Haskell are really Streams.&lt;/p&gt;
-&lt;p&gt;Streams offer a number of advantages for certain kinds of programming tasks,
-but due to differences between Scala and Scheme or Haskell, and for reasons
-that we will get into, in order to avoid exhausting the heap, more care has to
-be taken when using Streams in Scala than you would have to in either Scheme or
-Haskell.&lt;/p&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>The Daily Functor</title><link href="http://nessus42.github.com/daily-functor" rel="alternate"></link><link href="http://nessus42.github.com/daily-functor/feeds/scala.atom.xml" rel="self"></link><id>http://nessus42.github.com/daily-functor</id><updated>2012-03-23T23:38:00-04:00</updated><entry><title>The Structure of Streams</title><link href="http://nessus42.github.com/daily-functor/structure-of-streams.html" rel="alternate"></link><updated>2012-03-23T23:38:00-04:00</updated><author><name>Douglas Alan</name></author><id>http://nessus42.github.com/daily-functor/structure-of-streams.html</id><summary type="html">&lt;p&gt;Streams are a staple of functional programming. They were invented for the
+Scheme programming language, and then adopted and used heavily by Haskell. In
+fact, they are used so heavily in Haskell that &lt;em&gt;all&lt;/em&gt; Lists in Haskell are
+really Streams. Streams offer a number of advantages for certain kinds of
+programming tasks, but due to differences between Scala and Scheme or Haskell,
+and for reasons that we will get into, in order to avoid exhausting the heap,
+more care has to be taken when using Streams in Scala than you would have to in
+either Scheme or Haskell.&lt;/p&gt;
 &lt;p&gt;Streams are heavily used in Clojure too, and in Clojure, Streams work just like
 they do in Scala. Consequently, in Clojure the same level of care is also
 required. So fear not that if you become proficient in the use Streams in
 Scala, that this knowledge won't port to any other programming environment.&lt;/p&gt;
-&lt;p&gt;Given the subtlety of Streams in Scala, why do we use them for the Chip File
-Writer? The executive summary is that the Chip File Writer does a single
+&lt;p&gt;Given the subtlety of Streams in Scala, why would we ever want to use them?  I
+won't attempt to provide an exhaustive answer to this question. Instead, I will
+explain how I solved a specific real-world problem in production code using
+Streams. The executive summary is that the program in question does a single
 database query that results in writing out 11 different files, each of which
 represents a different transformation of the data that is contained in that
 single query. Since we cannot rely on the results of the query fitting into
 ram, the data from the stream is processed in a streaming manner in 11
 different ways. This sort of processing can be expressed very naturally using
 Streams.&lt;/p&gt;
-&lt;p&gt;Sure, we could have done 11 different queries instead, and thereby simplified
-the structure and logic of the code, but then the program would be much
-slower. This will be an issue when we have many clone pools.&lt;/p&gt;
-&lt;p&gt;Also, please note that in the discussion below I am describing the Chip File
-Writer when I show code examples and diagrams. I don't refer to the program by
-name below because I intend to break the following out into a stand-alone
-document intended for a more general audience.&lt;/p&gt;
+&lt;p&gt;Sure, I could have had the program run 11 different queries instead, and
+thereby simplified the structure and logic of the code, but then the program
+would have been much slower. Since this program will ultimately run many times
+a day, performance is an important factor.&lt;/p&gt;
 &lt;div class="section" id="what-are-streams"&gt;
 &lt;h2&gt;What Are Streams?&lt;/h2&gt;
 &lt;p&gt;First of all, we should make it clear that the Streams we're talking about here
@@ -591,5 +587,4 @@ it will consume a lot of ram.&lt;/td&gt;&lt;/tr&gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-</summary></entry><entry><title>Index</title><link href="http://nessus42.github.com/daily-functor/index.html" rel="alternate"></link><updated>2012-03-28T02:15:57-04:00</updated><author><name>Douglas Alan</name></author><id>http://nessus42.github.com/daily-functor/index.html</id><summary type="html">&lt;p&gt;I just want to see what happens if I have a file index.rst.&lt;/p&gt;
-</summary></entry></feed>
+</summary><category term="scala"></category><category term="tutorials"></category></entry></feed>
