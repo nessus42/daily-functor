@@ -37,6 +37,9 @@
     {% if not HIDE_DATE %}<time datetime="{{ article.date.isoformat() }}">{{ article.locale_date }}</time>{% endif %}
 </td></tbody></table>
 </header>
+
+<div class="Clear" style="margin-bottom: 1in"></div>
+
 <article>
     {{ article.content }}
 </article>
