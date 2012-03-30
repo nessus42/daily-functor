@@ -34,6 +34,8 @@ html: clean $(OUTPUTDIR)/index.html
 
 $(OUTPUTDIR)/%.html:
 	$(PELICAN) $(INPUTDIR) -o $(OUTPUTDIR) -s $(CONFFILE)
+	echo dailyfunctor.gaffa.org > $(OUTPUTDIR)/CNAME
+	echo > $(OUTPUTDIR)/.nojekyll
 
 clean:
 	rm -fr $(OUTPUTDIR)
@@ -53,4 +55,3 @@ github: $(OUTPUTDIR)/index.html
 	git push origin gh-pages
 
 .PHONY: html help clean ftp_upload ssh_upload dropbox_upload github
-    

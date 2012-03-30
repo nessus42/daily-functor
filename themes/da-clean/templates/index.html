@@ -9,23 +9,25 @@
               ">
 <tbody><tr>
 <td>
-   <div style="margin: auto 0.5in auto auto;
+  <a href="{{ SITEURL }}/index.html">
+    <div style="margin: auto 0.5in auto auto;
                color: #797;
                ">
-     <span class="hover-red"
-           style="font-family: Hoefler Text, serif;
-                  font-size: 10em;
-                  font-weight: normal;
-                  margin: auto;
-                  ">
-       &lambda;
-     </span>
-   </div>
+      <div class="hover-red">
+        <span style="font-family: Hoefler Text, serif;
+                     font-size: 10em;
+                     font-weight: normal;
+                     margin: auto;
+                     ">
+          &lambda;
+        </span>
+      </div>
+    </div>
+  </a>
 </td>
 <td style="vertical-align: top;">
 
-                <h1>{{ SITENAME }}</h1>
-
+                <h1><a href="{{ SITEURL }}/index.html" id="site-title">{{ SITENAME }}</a></h1>
                 {% if SITESUBTITLE %} <h2 style="color: #AAA">{{ SITESUBTITLE }}</h2>{% endif %}</a>
 
                 Occasional<sup>*</sup> Musings on Programming in Scala by

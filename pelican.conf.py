@@ -6,8 +6,15 @@ DEFAULT_LANG='en'
 AUTHOR = "Douglas Alan"
 SITENAME = "The Daily Functor"
 SITESUBTITLE = '2.0 Steps Forward, 1.0 Steps Back'
-SITEURL = 'http://nessus42.github.com/daily-functor'
-# GITHUB_URL = 'http://github.com/nessus42/daily-functor'
+# SITEURL = 'http://nessus42.github.com/daily-functor'
+SITEURL = 'http://dailyfunctor.gaffa.org'
+
+# Comment this entry out if you don't want the GitHub banner in the top right
+# corner of every page. (Note that you can also change the color of the ribbon
+# by editing the github.html template. Google for "github banner" to find the other
+# choices.):
+GITHUB_URL = 'http://github.com/nessus42/daily-functor'
+
 DISQUS_SITENAME = "dailyfunctor"
 
 FEED_RSS = 'feeds/all.rss.xml'
