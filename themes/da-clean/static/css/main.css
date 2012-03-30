@@ -205,3 +205,9 @@ footer li {
 footer p {
   text-align: right;
 }
+
+.Clear { clear: both; height: 0; overflow: hidden; }
+
+.hover-red:hover {
+    color: #A00;
+}

@@ -1,19 +1,40 @@
 {% extends "base.html" %}
 {% block content_title %}{% endblock %}
 {% block content %}        
-            <center>
-            <header>
+<header>
+<table style="padding: 0;
+              margin: 0;
+              border-spacing: 0;
+              border-collapse: collapse;
+              ">
+<tbody><tr>
+<td>
+   <div style="margin: auto 0.5in auto auto;
+               color: #797;
+               ">
+     <span class="hover-red"
+           style="font-family: Hoefler Text, serif;
+                  font-size: 10em;
+                  font-weight: normal;
+                  margin: auto;
+                  ">
+       &lambda;
+     </span>
+   </div>
+</td>
+<td style="vertical-align: top;">
+
                 <h1>{{ SITENAME }}</h1>
 
                 {% if SITESUBTITLE %} <h2 style="color: #AAA">{{ SITESUBTITLE }}</h2>{% endif %}</a>
 
                 Occasional<sup>*</sup> Musings on Programming in Scala by
                 Douglas Alan
-            </header>
-            </center>
+</td></tbody></table>
+</header>
+<div class="Clear" style="margin-bottom: 1.25in"></div>
 {% if articles %}
     {% for article in articles %}        
-
         {# First item #}
         {% if loop.index0 < 3 %}
                 <h2>{{ article.title }}
