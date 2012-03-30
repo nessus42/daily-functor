@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>The Daily Functor</title><link>http://nessus42.github.com/daily-functor</link><description>2.0 Steps Forward, 1.0 Steps Back</description><atom:link href="http://nessus42.github.com/daily-functor/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Fri, 23 Mar 2012 23:38:00 -0400</lastBuildDate><item><title>The Structure of Streams</title><link>http://nessus42.github.com/daily-functor/structure-of-streams.html</link><description>&lt;p&gt;Streams are a staple of functional programming. They were invented for the
+<rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title>The Daily Functor</title><link>http://dailyfunctor.gaffa.org</link><description>2.0 Steps Forward, 1.0 Steps Back</description><atom:link href="http://dailyfunctor.gaffa.org/feeds/all.rss.xml" rel="self"></atom:link><lastBuildDate>Fri, 23 Mar 2012 23:38:00 -0400</lastBuildDate><item><title>The Structure of Streams</title><link>http://dailyfunctor.gaffa.org/structure-of-streams.html</link><description>&lt;p&gt;Streams are a staple of functional programming. They were invented for the
 Scheme programming language, and then adopted and used heavily by Haskell. In
 fact, they are used so heavily in Haskell that &lt;em&gt;all&lt;/em&gt; Lists in Haskell are
 really Streams. Streams offer a number of advantages for certain kinds of
@@ -587,4 +587,4 @@ it will consume a lot of ram.&lt;/td&gt;&lt;/tr&gt;
 &lt;span class="o"&gt;}&lt;/span&gt;
 &lt;/pre&gt;&lt;/div&gt;
 &lt;/div&gt;
-</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Douglas Alan</dc:creator><pubDate>Fri, 23 Mar 2012 23:38:00 -0400</pubDate><guid>http://nessus42.github.com/daily-functor/structure-of-streams.html</guid><category>scala</category><category>tutorials</category></item></channel></rss>
+</description><dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Douglas Alan</dc:creator><pubDate>Fri, 23 Mar 2012 23:38:00 -0400</pubDate><guid>http://dailyfunctor.gaffa.org/structure-of-streams.html</guid><category>scala</category><category>tutorials</category></item></channel></rss>
